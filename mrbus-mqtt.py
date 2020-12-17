@@ -326,7 +326,7 @@ def main(mainParms):
               'src': pkt.src,
               'dst': pkt.dest,
               'cmd': pkt.cmd,
-              'data': ["%u" % d for d in pkg.data]
+              'data': ["%u" % d for d in pkt.data]
             }
 
             message = json.dumps(updateMessage, sort_keys=True)
