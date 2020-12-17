@@ -1,0 +1,14 @@
+[global]
+baseAddress = 0xFE
+
+mqttServer = localhost
+mqttPort = 1883
+mqttReconnectInterval = 10
+
+logFile = mrbus-mqtt.log
+fileLogLevel = debug
+consoleLogLevel = warning
+
+mrbusInterfaceType = ci2
+mrbusPort = /dev/ttyUSB0
+
