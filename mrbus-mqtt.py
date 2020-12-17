@@ -30,7 +30,6 @@ import argparse
 import configparser
 import re
 import struct
-from simpleeval import simple_eval
 import mrbus
 import datetime
 import paho.mqtt.client as mqtt
