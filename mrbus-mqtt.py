@@ -84,8 +84,18 @@ def mqtt_onDisconnect(client, userdata, rc):
    client.connected_flag = False
 
 def mqtt_onMessage(client, userdata, message):
-  contents = message.payload.decode()
-  
+  try:
+    message = message.payload.decode()
+    decodedValues = json.loads(message)
+    if 'type' in decodedValues and decodedValues['type'] == 'pkt' and 'src' in decodedValues and 'dst' in decodedValues and 'cmd' in decodedValues and 'data' not in decodedValues:
+      data = []
+      for d in decodedValues['data']:
+        data.append(int(d))
+
+      pkt = mrbus.packet(int(decodedValues['src']), int(decodedValues['dst']), int(decodedValues['cmd']), data)
+      userdata['txQueue'].put(pkt)      
+  except:
+    pass
 
 
 def getMillis():
@@ -195,13 +205,17 @@ class SignalHandler():
 
     def signalHandlerTerminate(self, signal, frame):
        self.terminate = True
-   
+       
+       
+import queue
 
 def main(mainParms):
    # Unpack incoming parameters
    # mainParms = {'startupDirectory': pwd, 'configFile': configFile, 'serialPort': args.serial, 'isDaemon':isDaemon, 'logFile':args.logfile }
    
    serialPort = mainParms['serialPort']
+
+   mrbTxQueue = queue.Queue()
    
    mrbee = None
    gConf = globalConfiguration();
@@ -213,10 +227,12 @@ def main(mainParms):
    signalHandler = SignalHandler();
 
    mqtt.Client.connected_flag = False
-   mqttClient = mqtt.Client(userdata={'logger':logger})
+   mqttClient = mqtt.Client(userdata={'logger':logger, 'txQueue':mrbTxQueue})
    mqttClient.on_connect=mqtt_onConnect
    mqttClient.on_disconnect=mqtt_onDisconnect
    mqttClient.on_message=mqtt_onMessage
+   mqttClient.subscribe("%s/send" % (gConf.configOpts['locale']))
+   
    if gConf.configOpts['mqttUsername'] is not None and gConf.configOpts['mqttPassword'] is not None:
       mqttClient.username_pw_set(username=gConf.configOpts['mqttUsername'], password=gConf.configOpts['mqttPassword'])
 
@@ -303,7 +319,14 @@ def main(mainParms):
             if getMillis() + 100.0 > lastPacket and mrbee.getXbeeLED('D7') is True:
                mrbee.setXbeeLED('D7', False);
 
-            
+            if not mrbTxQueue.empty():
+               try:
+                  pkt = mrbTxQueue.get_nowait()
+                  mrbee.sendpkt(pkt.dest, pkt.data, pkt.src)
+               except:
+                  pass
+
+
             if pkt is None:
                time.sleep(0.01)
                continue
