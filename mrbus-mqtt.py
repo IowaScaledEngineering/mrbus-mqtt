@@ -88,20 +88,17 @@ def mqtt_onDisconnect(client, userdata, rc):
    client.connected_flag = False
 
 def mqtt_onMessage(client, userdata, message):
-  print("Yeah, I'm here!")
+  global mrbTxQueue
+  logger = userdata['logger']
   try:
     message = message.payload.decode()
     decodedValues = json.loads(message)
-    print("Got message [%s]" % (decodedValues))    
     if 'type' in decodedValues and decodedValues['type'] == 'pkt' and 'src' in decodedValues and 'dst' in decodedValues and 'cmd' in decodedValues and 'data' in decodedValues:
-      print("In putter")
       data = []
       for d in decodedValues['data']:
         data.append(int(str(d), 0))
 
       pkt = mrbus.packet(int(str(decodedValues['dst']),0), int(str(decodedValues['src']),0), int(str(decodedValues['cmd']),0), data)
-      print("Got message!  %s" % (pkt))
-      global mrbTxQueue
       mrbTxQueue.put(pkt)      
   except Exception as e:
     print(e)
@@ -330,7 +327,6 @@ def main(mainParms):
                mrbee.setXbeeLED('D7', False);
 
             if not mrbTxQueue.empty():
-               print("Trying transmit - queue depth %d" % (mrbTxQueue.qsize()))
                try:
                   pkt = mrbTxQueue.get_nowait()
                   mrbee.sendpkt(pkt.dest, [pkt.cmd] + pkt.data, pkt.src)
