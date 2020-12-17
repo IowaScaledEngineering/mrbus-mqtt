@@ -33,11 +33,13 @@ import struct
 import mrbus
 import datetime
 import paho.mqtt.client as mqtt
+import paho.mqtt.subscribe as subscribe
 import json
 import logging
 import daemonize
 import sys, os, time
 import signal
+import queue
 
 try:
    import serial.tools.list_ports
@@ -51,6 +53,8 @@ def findXbeePort():
       if "FTDI" == p.manufacturer:
          return p.device
    return None
+
+mrbTxQueue = queue.Queue()
 
 def mqtt_onConnect(client, userdata, flags, rc):
    logger = userdata['logger']
@@ -84,17 +88,23 @@ def mqtt_onDisconnect(client, userdata, rc):
    client.connected_flag = False
 
 def mqtt_onMessage(client, userdata, message):
+  print("Yeah, I'm here!")
   try:
     message = message.payload.decode()
     decodedValues = json.loads(message)
-    if 'type' in decodedValues and decodedValues['type'] == 'pkt' and 'src' in decodedValues and 'dst' in decodedValues and 'cmd' in decodedValues and 'data' not in decodedValues:
+    print("Got message [%s]" % (decodedValues))    
+    if 'type' in decodedValues and decodedValues['type'] == 'pkt' and 'src' in decodedValues and 'dst' in decodedValues and 'cmd' in decodedValues and 'data' in decodedValues:
+      print("In putter")
       data = []
       for d in decodedValues['data']:
-        data.append(int(d))
+        data.append(int(str(d), 0))
 
-      pkt = mrbus.packet(int(decodedValues['src']), int(decodedValues['dst']), int(decodedValues['cmd']), data)
-      userdata['txQueue'].put(pkt)      
-  except:
+      pkt = mrbus.packet(int(str(decodedValues['dst']),0), int(str(decodedValues['src']),0), int(str(decodedValues['cmd']),0), data)
+      print("Got message!  %s" % (pkt))
+      global mrbTxQueue
+      mrbTxQueue.put(pkt)      
+  except Exception as e:
+    print(e)
     pass
 
 
@@ -207,16 +217,14 @@ class SignalHandler():
        self.terminate = True
        
        
-import queue
-
 def main(mainParms):
    # Unpack incoming parameters
    # mainParms = {'startupDirectory': pwd, 'configFile': configFile, 'serialPort': args.serial, 'isDaemon':isDaemon, 'logFile':args.logfile }
    
    serialPort = mainParms['serialPort']
 
-   mrbTxQueue = queue.Queue()
-   
+   global mrbTxQueue
+
    mrbee = None
    gConf = globalConfiguration();
    gConf.loadConfiguration(mainParms['configFile'], logFile=mainParms['logFile'], workingDir=mainParms['startupDirectory'], isDaemon=mainParms['isDaemon'])
@@ -228,18 +236,22 @@ def main(mainParms):
 
    mqtt.Client.connected_flag = False
    mqttClient = mqtt.Client(userdata={'logger':logger, 'txQueue':mrbTxQueue})
+   if gConf.configOpts['mqttUsername'] is not None and gConf.configOpts['mqttPassword'] is not None:
+      mqttClient.username_pw_set(username=gConf.configOpts['mqttUsername'], password=gConf.configOpts['mqttPassword'])
+
+   mqttClient.connect(gConf.configOpts['mqttBroker'], gConf.configOpts['mqttPort'], keepalive=60)
+
    mqttClient.on_connect=mqtt_onConnect
    mqttClient.on_disconnect=mqtt_onDisconnect
    mqttClient.on_message=mqtt_onMessage
-   mqttClient.subscribe("%s/send" % (gConf.configOpts['locale']))
-   
-   if gConf.configOpts['mqttUsername'] is not None and gConf.configOpts['mqttPassword'] is not None:
-      mqttClient.username_pw_set(username=gConf.configOpts['mqttUsername'], password=gConf.configOpts['mqttPassword'])
+   mqttClient.subscribe('crnw/send')
+   mqttClient.loop_start()
+
 
    # Initialization
 
    lastPacket = getMillis() - 1000.0
-   lastMQTTConnectAttempt = None
+   lastMQTTConnectAttempt = time.time()
 
    logger.info("Starting run phase")
    
@@ -298,13 +310,12 @@ def main(mainParms):
             # We don't have an MQTT client and need to try reconnecting
             try:
                lastMQTTConnectAttempt = time.time()
-               mqttClient.loop_start()
-               mqttClient.connect(gConf.configOpts['mqttBroker'], gConf.configOpts['mqttPort'], keepalive=60)
+#               mqttClient.connect(gConf.configOpts['mqttBroker'], gConf.configOpts['mqttPort'], keepalive=60)
                while not mqttClient.connected_flag: 
                   time.sleep(2) # Wait for callback to fire
-               mqttClient.loop_stop()
                if mqttClient.connected_flag is True:
                   mrbee.setXbeeLED('D8', True);
+
             except(KeyboardInterrupt):
                raise
             except:
@@ -313,16 +324,16 @@ def main(mainParms):
 
          try:
             # Start allowing MQTT callbacks
-            mqttClient.loop_start()
             pkt = mrbee.getpkt()
 
             if getMillis() + 100.0 > lastPacket and mrbee.getXbeeLED('D7') is True:
                mrbee.setXbeeLED('D7', False);
 
             if not mrbTxQueue.empty():
+               print("Trying transmit - queue depth %d" % (mrbTxQueue.qsize()))
                try:
                   pkt = mrbTxQueue.get_nowait()
-                  mrbee.sendpkt(pkt.dest, pkt.data, pkt.src)
+                  mrbee.sendpkt(pkt.dest, [pkt.cmd] + pkt.data, pkt.src)
                except:
                   pass
 

@@ -185,10 +185,11 @@ class mrbusSimple(object):
     for d in data:
       if type(d) == str:
         d=ord(d)
-      s+=" %02X"%(d&0xff)
-    s+=";\r"
-    self.logger.debug('>>>MRBUS ' +s)
-    self.serial.write(s)
+      s += " %02X" % (d&0xff)
+    s += ";\r"
+    self.logger.debug('>>>MRBUS ' + s)
+    sba = [ord(c) for c in s]
+    self.serial.write(sba)
 
 
 class mrbeeSimple(object):
